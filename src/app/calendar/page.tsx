@@ -11,6 +11,7 @@ export default function CalendarPage() {
     const [currentDate, setCurrentDate] = useState(new Date());
 
     useEffect(() => {
+        // Force Vercel Rebuild Trigger: v2
         const savedRoutines = localStorage.getItem('routine-keeper-data');
         if (savedRoutines) setRoutines(JSON.parse(savedRoutines));
 
