@@ -136,7 +136,7 @@ export default function SleepPage() {
             bedTime: startStr,
             wakeTime: endStr,
             duration,
-            quality: 0
+            quality: 3
         };
 
         const updated = [...records, newRecord];

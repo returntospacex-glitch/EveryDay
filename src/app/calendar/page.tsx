@@ -3,56 +3,78 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Calendar as CalendarIcon, Flame, Trophy, Clock, ChevronLeft, ChevronRight, Check, Star } from 'lucide-react';
-import { Routine } from '@/types/routine';
+import { Routine, Habit } from '@/types/routine';
 
 export default function CalendarPage() {
     const [routines, setRoutines] = useState<Routine[]>([]);
+    const [habits, setHabits] = useState<Habit[]>([]);
     const [currentDate, setCurrentDate] = useState(new Date());
 
     useEffect(() => {
-        const saved = localStorage.getItem('routine-keeper-data');
-        if (saved) {
-            setRoutines(JSON.parse(saved));
-        }
+        const savedRoutines = localStorage.getItem('routine-keeper-data');
+        if (savedRoutines) setRoutines(JSON.parse(savedRoutines));
+
+        const savedHabits = localStorage.getItem('routine-keeper-habits');
+        if (savedHabits) setHabits(JSON.parse(savedHabits));
     }, []);
 
     // --- Logic: Data Processing ---
 
     // 1. Calculate Daily Completion Rate for History
-    // Returns map: { "2024-01-01": 0.8, "2024-01-02": 1.0, ... }
     const getCompletionMap = () => {
         const map: { [key: string]: number } = {};
-
-        // This is tricky because "Past Data" isn't fully stored transactionally in the current simple app.
-        // We currently store 'completedDates' in each routine.
-        // We will iterate through all routines and fill the map.
-
-        // Improve: In a real app, we'd have a separate "DailyLog" table. 
-        // Here we reconstruct history from `routine.completedDates`.
-
         const dateSet = new Set<string>();
-        routines.forEach(r => {
-            if (r.completedDates) r.completedDates.forEach(d => dateSet.add(d));
+
+        // Habits: Add all dates from completedDates
+        habits.forEach(h => {
+            h.completedDates.forEach(d => dateSet.add(d));
         });
 
-        // For every date where at least one thing was done
+        // Routines: Add dates of all routines
+        routines.forEach(r => {
+            if (r.date) dateSet.add(r.date);
+        });
+
+        // For every date where at least one thing was done OR planned
         dateSet.forEach(dateStr => {
-            // Find active routines for that date (simplified: assume all routines were active)
-            // In a real app, check creationDate vs dateStr.
+            // Count total routines/habits for that day
+            let totalForDay = 0;
+            let completedForDay = 0;
 
-            // Count total routines that *should* have been done
-            // Simplified: Count all recurring habits + one-time tasks for that specific date
-            const totalForDay = routines.filter(r => {
-                if (!r.frequency) return r.date === dateStr; // One-time
-                // For habits, simplified: assume they are daily/active. 
-                // Accurate historical tracking requires more complex schema.
-                // WE WILL APPROXIMATE: Total Active Habits count.
-                return true;
-            }).length;
+            // Check Habits
+            habits.forEach(h => {
+                // Simplified: Assume habits are active every day for history visualization
+                // In reality, should check frequency.
+                // For now, if it appears in completedDates, it counts.
+                // If not, we might miss it if filtering strictly. 
+                // Let's just track "Habits" if they have completion on that day OR if they assume daily.
+                // To match the previous logic:
+                if (h.frequency.type === 'daily') {
+                    totalForDay++;
+                    if (h.completedDates.includes(dateStr)) completedForDay++;
+                } else if (h.frequency.type === 'weekly' || h.frequency.type === 'interval') {
+                    // Only count if it was relevant? 
+                    // Simplified: If completed, +1/+1. If not, maybe ignored or +0/+1?
+                    // Let's go soft: If it's a habit day, count it.
+                    const start = new Date(h.startDate);
+                    const target = new Date(dateStr);
+                    if (target >= start) {
+                        // Check interval/frequency logic here if needed, but for "Contribution Graph", 
+                        // usually just "did I do what I needed?"
+                        // Let's rely on completion.
+                        if (h.completedDates.includes(dateStr)) {
+                            totalForDay++;
+                            completedForDay++;
+                        }
+                    }
+                }
+            });
 
-            const completedForDay = routines.filter(r =>
-                r.completedDates?.includes(dateStr)
-            ).length;
+            // Check Routines
+            routines.filter(r => r.date === dateStr).forEach(r => {
+                totalForDay++;
+                if (r.isCompleted) completedForDay++;
+            });
 
             map[dateStr] = totalForDay > 0 ? (completedForDay / totalForDay) : 0;
         });
@@ -107,7 +129,7 @@ export default function CalendarPage() {
     const getUpcomingTasks = () => {
         const today = new Date().toISOString().split('T')[0];
         return routines
-            .filter(r => !r.frequency && r.date && r.date > today)
+            .filter(r => r.date && r.date > today)
             .sort((a, b) => (a.date! > b.date! ? 1 : -1));
     };
 
@@ -249,7 +271,7 @@ export default function CalendarPage() {
                                             </div>
                                             <div className="text-xs text-gray-500 mt-2 flex gap-2">
                                                 <span className="px-2 py-0.5 bg-white/5 rounded-md">
-                                                    {task.category.icon} {task.category.name}
+                                                    {task.category}
                                                 </span>
                                             </div>
                                         </div>

@@ -8,8 +8,12 @@ import AddRoutineModal from '@/components/AddRoutineModal';
 import CategoryManagerModal from '@/components/CategoryManagerModal';
 import FeedbackCard from '@/components/FeedbackCard';
 import { BarChart, Bar, ResponsiveContainer, Cell } from 'recharts';
+import { db } from '@/lib/firebase';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function RoutinePage() {
+  const { user } = useAuth();
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -72,40 +76,62 @@ export default function RoutinePage() {
   }, []);
 
 
-  // Load Data
+  // Load Data from Firestore
   useEffect(() => {
-    const savedRoutines = localStorage.getItem('routine-keeper-data');
-    if (savedRoutines) {
-      try { setRoutines(JSON.parse(savedRoutines)); } catch (e) { console.error(e); }
-    }
+    if (!user) return;
 
-    const savedHabits = localStorage.getItem('routine-keeper-habits');
-    if (savedHabits) {
-      try { setHabits(JSON.parse(savedHabits)); } catch (e) { console.error(e); }
-    } else {
-      const initialHabits: Habit[] = [
-        {
-          id: 'h1', title: '아침 스트레칭', category: '운동', frequency: { type: 'daily', value: 1 },
-          startDate: '2025-01-01', completedDates: []
-        },
-        {
-          id: 'h2', title: '독서 30분', category: '공부', frequency: { type: 'daily', value: 1 },
-          startDate: '2025-01-01', completedDates: [], value: 30, unit: '분'
-        },
-        {
-          id: 'h3', title: '주 3회 런닝', category: '운동', frequency: { type: 'weekly', value: 3 },
-          startDate: '2025-01-01', completedDates: [], value: 5, unit: 'km'
+    // Routines Listener
+    const routineq = query(collection(db, 'users', user.uid, 'routines'));
+    const unsubRoutines = onSnapshot(routineq, (snapshot) => {
+      const loaded: Routine[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Routine));
+      setRoutines(loaded);
+    });
+
+    // Habits Listener
+    const habitq = query(collection(db, 'users', user.uid, 'habits'));
+    const unsubHabits = onSnapshot(habitq, (snapshot) => {
+      const loaded: Habit[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Habit));
+
+      // Data Migration Check (Local -> Fire)
+      // Only run if Firestore is empty and Local has data
+      if (loaded.length === 0) {
+        const localHabits = localStorage.getItem('routine-keeper-habits');
+        if (localHabits) {
+          const parsed = JSON.parse(localHabits);
+          parsed.forEach(async (h: Habit) => {
+            await setDoc(doc(db, 'users', user.uid, 'habits', h.id), h);
+          });
         }
-      ];
-      setHabits(initialHabits);
-      localStorage.setItem('routine-keeper-habits', JSON.stringify(initialHabits));
-    }
+        const localRoutines = localStorage.getItem('routine-keeper-data');
+        if (localRoutines) {
+          const parsed = JSON.parse(localRoutines);
+          parsed.forEach(async (r: Routine) => {
+            await setDoc(doc(db, 'users', user.uid, 'routines', r.id), r);
+          });
+        }
+        // Allow listener to catch the updates next tick
+      } else {
+        setHabits(loaded);
+      }
+    });
 
+    // Categories (Simple fetch or default)
+    // For now, let's keep categories local or simple default, or maybe sync later.
+    // Let's stick to LocalStorage for Categories for now to reduce Complexity, or migrate them too?
+    // User can customize categories. Better to sync.
+    // Let's store categories in a single doc 'settings/categories'
+    // But for now, let's just keep using LocalStorage for Categories to avoid breaking too much at once, 
+    // OR create a 'categories' collection.
+    // Let's use LocalStorage for Categories for this iteration to speed up essential data migration.
     const savedCats = localStorage.getItem('routine-keeper-categories');
     if (savedCats) setCategories(JSON.parse(savedCats));
     else setCategories(['루틴', '운동', '공부', '수면', '기타']);
 
-  }, []);
+    return () => {
+      unsubRoutines();
+      unsubHabits();
+    };
+  }, [user]);
 
   const handleUpdateCategories = (newCategories: string[]) => {
     setCategories(newCategories);
